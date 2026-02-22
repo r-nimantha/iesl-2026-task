@@ -171,12 +171,12 @@ class DroneController:
             if tag_found:
                 if not id_displayed:
                     print(f"April tag {tag_id} detected", flush=True)
+                    self.send_velocity(0.05, 0, 0, 3)
+                    time.sleep(3)
                     id_displayed = True
                 self.center_tag(tag_cx, tag_cy)
                 if abs(tag_cx - IMG_WIDTH/2) < x_tolerance and abs(tag_cy - IMG_HEIGHT/2) < y_tolerance:
                     print(f"April tag is centered", flush=True)
-                    self.send_velocity(0, 0, 0, 3)
-                    time.sleep(3)
                     camera.reset_detections()
                     return True
                 continue

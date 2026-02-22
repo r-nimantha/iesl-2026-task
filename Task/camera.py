@@ -48,11 +48,8 @@ class CameraStream:
                     self.line_found = False
                 return False
 
-            longest = max(lines, key=lambda l: np.hypot(
-                l[0][2] - l[0][0],
-                l[0][3] - l[0][1]
-            ))
-            x1, y1, x2, y2 = longest[0]
+            rightmost = max(lines, key=lambda l: (l[0][0] + l[0][2])/2)
+            x1, y1, x2, y2 = rightmost[0]
             cx = (x1 + x2) // 2
             cy = (y1 + y2) // 2
             angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
