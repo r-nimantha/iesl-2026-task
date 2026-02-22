@@ -28,5 +28,5 @@ sc:
 		--camera-port 5599
 
 run:
-	$(PYTHON) ./IESL-RoboGames-Uni-Phase1/Task/flight.py
+	$(PYTHON) ./IESL-RoboGames-Uni-Phase1/Task/flight.py 2>&1
 

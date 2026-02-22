@@ -1,6 +1,9 @@
 import time
 from pymavlink import mavutil
 
+IMG_WIDTH =  640
+IMG_HEIGHT = 480
+
 class DroneController:
     def __init__(self, connection_str):
         self.connection_str = connection_str
@@ -8,16 +11,16 @@ class DroneController:
         self.home = {"x": 0, "y": 0, "z": 0}
 
     def connect(self):
-        print("Connecting to SITL...")
+        print("Connecting to SITL...", flush=True)
         self.master = mavutil.mavlink_connection(self.connection_str)
 
     def wait_heartbeat(self):
-        print("Waiting for heartbeat...")
+        print("Waiting for heartbeat...", flush=True)
         self.master.wait_heartbeat()
-        print(f"Heartbeat from system {self.master.target_system}, component {self.master.target_component}")
+        print(f"Heartbeat from system {self.master.target_system}, component {self.master.target_component}", flush=True)
 
     def set_mode(self, mode="GUIDED"):
-        print(f"Setting mode to {mode}...")
+        print(f"Setting mode to {mode}...", flush=True)
         mode_id = self.master.mode_mapping()[mode]
         self.master.mav.set_mode_send(
             self.master.target_system,
@@ -27,7 +30,7 @@ class DroneController:
         time.sleep(2)
 
     def arm(self):
-        print("Arming vehicle...")
+        print("Arming vehicle...", flush=True)
         self.master.mav.command_long_send(
             self.master.target_system,
             self.master.target_component,
@@ -40,7 +43,7 @@ class DroneController:
         time.sleep(3)
 
     def takeoff(self, altitude=2.0):
-        print(f"Taking off to {altitude} m...")
+        print(f"Taking off to {altitude} m...", flush=True)
         self.master.mav.command_long_send(
             self.master.target_system,
             self.master.target_component,
@@ -56,8 +59,32 @@ class DroneController:
         # self.home["y"] = msg.y
         # self.home["z"] = msg.z
 
+    def land(self):
+        self.master.mav.command_long_send(
+            self.master.target_system,
+            self.master.target_component,
+            mavutil.mavlink.MAV_CMD_NAV_LAND,
+            0,
+            0,0,0,0,
+            0,0,
+            0
+        )
+        print("Landing...", flush=True)
+        # disarm after landing
+        time.sleep(10)
+        self.master.mav.command_long_send(
+            self.master.target_system,
+            self.master.target_component,
+            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+            0,
+            0,
+            21196,
+            0,0,0,0,0
+        )
+        print("Disarming...", flush=True)
+
     def return_to_home(self):
-        print("Returning to home...")
+        print("Returning to home...", flush=True)
         self.master.mav.set_position_target_local_ned_send(
             0,
             self.master.target_system,
@@ -71,10 +98,6 @@ class DroneController:
         )
 
     def send_velocity(self, vx=0, vy=0, vz=0, duration=5.0, rate=10):
-        """
-        Sends velocity in body frame continuously for `duration` seconds.
-        `rate` = messages per second.
-        """
         velocity_mask = int("110111000111", 2)
         msg = self.master.mav.set_position_target_local_ned_encode(
             0,
@@ -95,9 +118,6 @@ class DroneController:
             time.sleep(interval)
 
     def send_velocity_once(self, vx=0, vy=0, vz=0, yaw_rate=0, rate=10):
-        """
-        Sends a single velocity command.
-        """
         velocity_mask = int("110111000111", 2)
         msg = self.master.mav.set_position_target_local_ned_encode(
             0,
@@ -108,52 +128,75 @@ class DroneController:
             0,0,0,
             vx,vy,vz,
             0,0,0,
-            0,yaw_rate
+            0,0
         )
         self.master.mav.send(msg)
 
 
+    def center_tag(self, tag_cx, tag_cy):
+        error_x = tag_cx - IMG_WIDTH/2
+        error_y = tag_cy - IMG_HEIGHT/2
+        gain = 0.0002
+        vx = gain * error_y * -1
+        vy = gain * error_x
+        vz = 0
+        # print(f"[CENTER_TAG] Tag center: ({tag_cx:.2f}, {tag_cy:.2f})")
+        self.send_velocity_once(vx=vx, vy=vy, vz=vz)
 
-    def follow_line(self, camera, forward_speed=0.5, lateral_gain=1.0, heading_gain=0.5, update_rate=10):
-        print("Starting line following...")
-        interval = 1.0 / update_rate
+
+    def turn_right_90_degrees(self):
+        self.master.mav.command_long_send(
+            self.master.target_system,
+            self.master.target_component,
+            mavutil.mavlink.MAV_CMD_CONDITION_YAW,
+            0,
+            90,
+            10,
+            1,1,
+            0,0,0
+        )
+
+
+    def follow_line(self, fine, camera, forward_speed=0.5, lateral_gain=1.0, heading_gain=0.5, update_rate=10):
+        id_displayed = False
+        if fine:
+            x_tolerance = 20
+            y_tolerance = 20
+        else:
+            x_tolerance = 50
+            y_tolerance = 30
 
         while True:
-
-            # AprilTag priority
             tag_found, tag_id, tag_cx, tag_cy = camera.get_april_tag_info()
             if tag_found:
-                print(f"April tag {tag_id} detected! Mission complete.")
-                self.send_velocity_once(0, 0, 0)
-                return True
+                if not id_displayed:
+                    print(f"April tag {tag_id} detected", flush=True)
+                    id_displayed = True
+                self.center_tag(tag_cx, tag_cy)
+                if abs(tag_cx - IMG_WIDTH/2) < x_tolerance and abs(tag_cy - IMG_HEIGHT/2) < y_tolerance:
+                    print(f"April tag is centered", flush=True)
+                    self.send_velocity(0, 0, 0, 3)
+                    time.sleep(3)
+                    camera.reset_detections()
+                    return True
+                continue
 
-            # Line detection
             line_found, line_cx, line_cy, line_angle = camera.get_line_info()
             if not line_found:
-                print("Line lost!")
+                print(f"Line lost!", flush=True)
                 self.send_velocity_once(0, 0, 0)
                 return False
 
-            image_center_x = 320
-
-            deviation = (line_cx - image_center_x) / image_center_x
-
+            deviation = (line_cx - IMG_WIDTH/2) / (IMG_WIDTH/2)
             vy = deviation * lateral_gain
-
-            yaw_rate = 0
-            if line_angle is not None:
-                angle_error = line_angle
-                yaw_rate = -angle_error * heading_gain
-
             vx = forward_speed * (1 - min(abs(deviation), 0.7))
 
             self.send_velocity_once(
                 vx=vx,
                 vy=vy,
                 vz=0,
-                yaw_rate=yaw_rate
             )
 
-            time.sleep(interval)
+            time.sleep(1.0 / update_rate)
 
 
