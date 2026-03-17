@@ -159,9 +159,10 @@ class DroneController:
 
     def follow_line(self, fine, camera, forward_speed=0.5, lateral_gain=1.0, heading_gain=0.5, update_rate=10):
         id_displayed = False
+        holding_iteration = 0
         if fine:
-            x_tolerance = 20
-            y_tolerance = 20
+            x_tolerance = 15
+            y_tolerance = 15
         else:
             x_tolerance = 50
             y_tolerance = 30
@@ -175,10 +176,12 @@ class DroneController:
                     time.sleep(3)
                     id_displayed = True
                 self.center_tag(tag_cx, tag_cy)
-                if abs(tag_cx - IMG_WIDTH/2) < x_tolerance and abs(tag_cy - IMG_HEIGHT/2) < y_tolerance:
-                    print(f"April tag is centered", flush=True)
-                    camera.reset_detections()
-                    return True
+                if abs(tag_cx - IMG_WIDTH/2) < x_tolerance and abs(tag_cy - IMG_HEIGHT/2-10) < y_tolerance:
+                    holding_iteration += 1
+                    if holding_iteration >= 20:
+                        print(f"April tag is centered", flush=True)
+                        camera.reset_detections()
+                        return True
                 continue
 
             line_found, line_cx, line_cy, line_angle = camera.get_line_info()

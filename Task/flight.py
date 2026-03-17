@@ -22,7 +22,7 @@ if __name__ == "__main__":
     
     # Find the April tag
 
-    print("Starting autonomous mission: Follow white line until April tag found")
+    print("Starting mission...")
     tag_found = drone.follow_line(
         fine = False,
         camera=cam,
