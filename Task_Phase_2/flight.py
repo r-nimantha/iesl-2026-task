@@ -88,7 +88,8 @@ if __name__ == "__main__":
             if target_idx >= len(Airports) or Airports[target_idx] == 0:
                 print("Mission complete!", flush=True)
                 break
-
+            
+            drone.arm()
             drone.takeoff(altitude=1.7)
             current_id = None
             continue
