@@ -62,7 +62,24 @@ class CameraStream:
         )
         return self.frame
     
-
+    def get_path_angles(self):
+        if self.white_mask is None:
+            return []
+        center_x, center_y = self.width // 2, self.height // 2
+        radius = self.height // 3 
+        ring_mask = np.zeros_like(self.white_mask)
+        cv2.circle(ring_mask, (center_x, center_y), radius, 255, thickness=5)
+        intersections = cv2.bitwise_and(self.white_mask, ring_mask)
+        contours, _ = cv2.findContours(intersections, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        all_angles = []
+        for cnt in contours:
+            M = cv2.moments(cnt)
+            if M["m00"] > 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                raw_angle = np.degrees(np.arctan2(cx - center_x, -(cy - center_y)))
+                all_angles.append(raw_angle)
+        return sorted(list(set(all_angles)))
     def compute_steering(self):
         cols_all = []
         rows_all = []
