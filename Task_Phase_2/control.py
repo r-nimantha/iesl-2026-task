@@ -158,7 +158,7 @@ class DroneController:
         if steering_error is None:
             self.send_velocity()
             return False
-        if abs(path_angle) > 30:
+        if abs(path_angle) > 35:
             print(path_angle)
             self.turn(path_angle * 2 / 3, speed=8)
             time.sleep(2)
