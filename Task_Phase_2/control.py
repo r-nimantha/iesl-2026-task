@@ -27,7 +27,7 @@ class DroneController:
             mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
             0,
             mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE,
-            100000,  # 10 Hz
+            75000,
             0, 0, 0, 0, 0
         )
 
@@ -78,7 +78,9 @@ class DroneController:
             0
         )
         print("Landing...", flush=True)
-        time.sleep(10)
+        time.sleep(15)
+
+    def disarm(self):
         self.master.mav.command_long_send(
             self.master.target_system,
             self.master.target_component,
@@ -131,34 +133,35 @@ class DroneController:
         )
         return abs(error_x) < self.center_threshold and abs(error_y) < self.center_threshold
 
-    def turn(self, angle_degrees, speed=20):
-        direction = 1 if angle_degrees >= 0 else -1
+    def turn(self, angle, speed=20):
+        direction = 1 if angle >= 0 else -1
         self.master.mav.command_long_send(
             self.master.target_system,
             self.master.target_component,
             mavutil.mavlink.MAV_CMD_CONDITION_YAW,
             0,
-            abs(angle_degrees),
+            abs(angle),
             speed,
             direction,
             1,
             0, 0, 0
         )
 
-    def turn_to_direction(self, direction):
-        angle = np.degrees(np.arctan2(direction[1], direction[0])) * -1
+    def turn_to_direction(self, direction=None, angle=None):
+        if angle is None:
+            angle = np.degrees(np.arctan2(direction[1], direction[0])) * -1
         self.turn(angle)
         print(f"Turning to direction {direction} (angle {angle:.1f} degrees)", flush=True)
-        time.sleep(15)
+        time.sleep(8)
 
     def follow_path(self, steering_error, yaw_rate, path_angle, speed=0.5):
         if steering_error is None:
             self.send_velocity()
             return False
-        if path_angle > 60:
+        if abs(path_angle) > 30:
             print(path_angle)
-            self.turn(path_angle / 4, speed=8)
-            time.sleep(3)
+            self.turn(path_angle * 2 / 3, speed=8)
+            time.sleep(2)
         self.send_velocity(
             vx=speed,
             vy=np.clip(steering_error * speed * self.lateral_gain, -1, 1),
