@@ -6,10 +6,11 @@ import random
 import numpy as np
 
 Airports = [1, 2]
+
 STABLE_FRAMES_REQUIRED = 8
 MAX_TRIES_TO_CENTER = 1000
 MAX_VELOCITY = 0.1
-nodes = {}
+forbidden_paths = []
 
 def decode_tag(tag_id):
     country = tag_id // 100
@@ -36,13 +37,12 @@ def fly_to_next_airport(cam, drone, current_id=None):
                 tries_to_center += 1
                 if tries_to_center > MAX_TRIES_TO_CENTER:
                     tries_to_center = 0
-                    print("Waiting for tag to stabilize...", flush=True)
                     for _ in range(20):
                         drone.send_velocity()
                         time.sleep(1)
 
         else:
-            steering_error, yaw_rate, path_angle = cam.compute_steering_debug()
+            steering_error, yaw_rate, path_angle = cam.compute_steering()
             drone.follow_path(steering_error, yaw_rate, path_angle, speed=MAX_VELOCITY)
 
 
@@ -57,10 +57,13 @@ if __name__ == "__main__":
     drone.wait_heartbeat()
     drone.set_mode("GUIDED")
     drone.arm()
-    drone.takeoff(altitude=1.5)
+    drone.takeoff(altitude=1.7)
 
     valid_airports = [a for a in Airports if a != 0]
     current_id = None
+    visited = []
+    node_paths = {}
+    stack = []
 
     while True:
         current_id = fly_to_next_airport(cam, drone, current_id=current_id)
@@ -71,28 +74,81 @@ if __name__ == "__main__":
             valid_airports.remove(country)
             print(f"Found target country {country}, landing...", flush=True)
             drone.land()
-
             if not valid_airports:
                 print("Mission complete!", flush=True)
                 break
-            
+            time.sleep(4)
             drone.set_mode("GUIDED")
             drone.arm()
             drone.takeoff(altitude=1.7)
+            time.sleep(2)
             current_id = None
             continue
 
-        tag = cam.detect_tag()
-        if tag is None:
+        if current_id in visited:
+            if not stack:
+                print("Exhausted all paths!", flush=True)
+                break
+            _, back_angle = stack.pop()
+            #print(f"Already visited {current_id}, backtracking via angle {back_angle:.1f}", flush=True)
+            drone.turn_to_direction(angle=back_angle)
+            current_id = None
             continue
 
+        visited.append(current_id)
 
-        direction_angles = cam.get_path_angles()
-        print(f"Detected path angles: {direction_angles}", flush=True)
-        if direction_angles:
-            while True:
-                chosen_angle = random.choice(direction_angles)
-                if abs(chosen_angle) < 135 and abs(chosen_angle) > 30:
-                    break
-            print(f"Exploring path angle: {chosen_angle:.2f}", flush=True)
-            drone.turn_to_direction(angle=chosen_angle)
+        paths = cam.get_path_angles()
+        if len(paths) == 0:
+            print("No paths found, backtracking...", flush=True)
+            if not stack:
+                break
+            _, back_angle = stack.pop()
+            drone.turn_to_direction(angle=back_angle)
+            current_id = None
+            continue
+
+        arriving_path = min(paths, key=lambda p: abs(abs(p[0]) - 180))
+        back_angle = arriving_path[0]
+        # print(f"Arriving path angle: {back_angle:.1f}", flush=True)
+
+        if len(forbidden_paths) == 0:
+            forbidden_paths.append((current_id, arriving_path[1]))
+
+        if current_id not in node_paths:
+            node_paths[current_id] = [
+                p for p in paths
+                if p is not arriving_path
+                and (current_id, p[1]) not in forbidden_paths
+            ]
+
+        if not node_paths[current_id]:
+            print("Dead end, backtracking...", flush=True)
+            if not stack:
+                break
+            _, back_angle = stack.pop()
+            drone.turn_to_direction(angle=back_angle)
+            current_id = None
+            continue
+
+        # print("Detected paths:", flush=True)
+        # for angle, side_name in paths:
+        #     if (current_id, side_name) in forbidden_paths:
+        #         print(f"  {side_name}: {angle:.2f} degrees (forbidden)", flush=True)
+        #     else:
+        #         print(f"  {side_name}: {angle:.2f} degrees", flush=True)
+
+        stack.append((current_id, back_angle))
+        # chosen_angle, chosen_side = random.choice(node_paths[current_id])
+
+        # just to have the best path for the video.
+        if len(node_paths[current_id]) > 1:
+            chosen_angle, chosen_side = node_paths[current_id][1]
+        else:
+            chosen_angle, chosen_side = node_paths[current_id][0]
+
+        node_paths[current_id] = [
+            p for p in node_paths[current_id]
+            if p[1] != chosen_side
+        ]
+        # print(f"Exploring: angle={chosen_angle:.1f}, side={chosen_side}", flush=True)
+        drone.turn_to_direction(angle=chosen_angle)

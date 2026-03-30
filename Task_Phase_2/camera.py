@@ -7,6 +7,8 @@ import cv2
 import apriltag
 from config import IMG_WIDTH, IMG_HEIGHT
 
+SIDE_NAMES = ["top", "right", "bottom", "left"]
+
 class CameraStream:
     def __init__(self, host="127.0.0.1", port=5599):
         self.host = host
@@ -26,10 +28,10 @@ class CameraStream:
     def run(self):
         self.connect()
         while True:
-            if self.frame_debug is not None:
-                cv2.imshow("Path Debug", self.frame_debug)
+            # if self.frame_debug is not None:
+            #     cv2.imshow("Path Debug", self.frame_debug)
             frame = self.get_frame()
-            # cv2.imshow("Camera", frame)
+            cv2.imshow("Camera", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
@@ -60,42 +62,21 @@ class CameraStream:
         self.white_mask = (blurred > 165).astype(np.uint8) * 255
         self.frame_debug = cv2.cvtColor(self.frame, cv2.COLOR_GRAY2BGR)
         return self.frame
-    
-    def get_path_angles(self):
-        if self.white_mask is None:
-            return []
-        center_x, center_y = self.width // 2, self.height // 2
-        radius = self.height // 3 
-        ring_mask = np.zeros_like(self.white_mask)
-        cv2.circle(ring_mask, (center_x, center_y), radius, 255, thickness=5)
-        intersections = cv2.bitwise_and(self.white_mask, ring_mask)
-        contours, _ = cv2.findContours(intersections, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        all_angles = []
-        for cnt in contours:
-            M = cv2.moments(cnt)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                raw_angle = np.degrees(np.arctan2(cx - center_x, -(cy - center_y)))
-                all_angles.append(raw_angle)
-        return sorted(list(set(all_angles)))
+        
+
     def compute_steering(self):
         cols_all = []
         rows_all = []
 
-        window_half = self.width // 3
-        if self.last_path_center_x is None:
-            center_x = self.width // 2
-        else:
-            center_x = int(self.last_path_center_x)
-
+        window_half = self.width // 4
+        center_x = int(self.last_path_center_x) if self.last_path_center_x is not None else self.width // 2
         x_start = max(0, center_x - window_half)
         x_end   = min(self.width, center_x + window_half)
 
         strips = [
-            (0, self.height // 10),
-            (self.height * 2 // 10,     self.height * 3 // 10),
-            (self.height * 4 // 10,     self.height // 2),
+            (0,                          self.height // 10),
+            (self.height * 2 // 10,      self.height * 3 // 10),
+            (self.height * 4 // 10,      self.height * 5 // 10),
         ]
 
         for r_start, r_end in strips:
@@ -103,26 +84,39 @@ class CameraStream:
             cols = np.where(roi > 0)[1]
             if len(cols) > 0:
                 cols_all.append(np.mean(cols) + x_start)
-                rows_all.append((r_start + r_end) / 2)
+                rows_all.append((r_start + r_end) / 2.0)
 
         if len(cols_all) < 2:
-            return None, None
+            return None, None, None
 
-        # Update last known path center using closest strip
-        self.last_path_center_x = cols_all[1]
+        self.last_path_center_x = cols_all[-1]
 
-        coeffs = np.polyfit(rows_all, cols_all, deg=2)
+        t = np.arange(len(cols_all), dtype=float)
+        deg = 2 if len(cols_all) >= 3 else 1
+        coeffs_x = np.polyfit(t, cols_all, deg=deg)
+        coeffs_y = np.polyfit(t, rows_all, deg=deg)
 
-        lookahead_row = self.height // 3
-        lookahead_x = np.polyval(coeffs, lookahead_row)
+        t_lookahead = 0
+        lookahead_x = np.polyval(coeffs_x, t_lookahead)
+        lookahead_y = np.polyval(coeffs_y, t_lookahead)
 
-        lateral_error = np.clip((lookahead_x - self.width / 2) / (self.width / 2), -1, 1)
+        dx_dt = np.polyval(np.polyder(coeffs_x), t_lookahead) * -1
+        dy_dt = np.polyval(np.polyder(coeffs_y), t_lookahead) * -1
 
-        tangent = np.polyval(np.polyder(coeffs), lookahead_row)
-        path_angle = np.arctan(tangent)
-        yaw_rate = np.clip(lateral_error * 0.2 + path_angle * 0.7, -1, 1)
+        path_angle = np.arctan2(dx_dt, -dy_dt)
 
-        return lateral_error, yaw_rate, path_angle * 180 / np.pi
+        lateral_error = np.clip(
+            (lookahead_x - self.width / 2) / (self.width / 2),
+            -1, 1
+        )
+
+        path_angle_normalized = path_angle / (np.pi / 2)
+        yaw_rate = np.clip(
+            lateral_error * 0.2 + path_angle_normalized * 0.7,
+            -1, 1
+        )
+
+        return lateral_error, yaw_rate, np.degrees(path_angle)
 
     def detect_tag(self):
         results = self.detector.detect(self.frame)
@@ -145,21 +139,36 @@ class CameraStream:
     def get_path_angles(self):
         if self.white_mask is None:
             return []
-        center_x, center_y = self.width // 2, self.height // 2
-        radius = self.height // 3 
+        tag = self.detect_tag()
+        if tag is None:
+            return []
+        center_x, center_y = tag.center
+        tag_radius = np.hypot(tag.corners[0][0] - tag.corners[2][0], tag.corners[0][1] - tag.corners[2][1]) / 2
+        sides_midpoints = [
+            ((tag.corners[i][0] + tag.corners[j][0]) / 2, (tag.corners[i][1] + tag.corners[j][1]) / 2)
+            for i, j in self.side_pairs
+        ]
+        radius = tag_radius * 1.5
         ring_mask = np.zeros_like(self.white_mask)
-        cv2.circle(ring_mask, (center_x, center_y), radius, 255, thickness=5)
+        cv2.circle(ring_mask, (int(center_x), int(center_y)), int(radius), 255, thickness=5)
         intersections = cv2.bitwise_and(self.white_mask, ring_mask)
         contours, _ = cv2.findContours(intersections, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        all_angles = []
+        paths = []
         for cnt in contours:
             M = cv2.moments(cnt)
             if M["m00"] > 0:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 raw_angle = np.degrees(np.arctan2(cx - center_x, -(cy - center_y)))
-                all_angles.append(raw_angle)
-        return sorted(list(set(all_angles)))
+                distances = [
+                    np.hypot(cx - mx, cy - my)
+                    for mx, my in sides_midpoints
+                ]
+                closest_side = int(np.argmin(distances))
+                side_name = SIDE_NAMES[closest_side]
+                paths.append((raw_angle, side_name))
+        # return only the first three elements, sorted by angle
+        return sorted(paths, key=lambda x: x[0])[:3]
 
 
     def compute_steering_debug(self):

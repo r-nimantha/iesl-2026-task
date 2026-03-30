@@ -12,6 +12,7 @@ class DroneController:
         self.lateral_gain = 2.5
         self.center_threshold = 0.1
         self.max_velocity = 0.3
+        self.last_turn_time = time.time()
 
     def connect(self):
         print("Connecting to SITL...", flush=True)
@@ -32,7 +33,6 @@ class DroneController:
         )
 
     def set_mode(self, mode="GUIDED"):
-        print(f"Setting mode to {mode}...", flush=True)
         mode_id = self.master.mode_mapping()[mode]
         self.master.mav.set_mode_send(
             self.master.target_system,
@@ -42,7 +42,6 @@ class DroneController:
         time.sleep(2)
 
     def arm(self):
-        print("Arming vehicle...", flush=True)
         self.master.mav.command_long_send(
             self.master.target_system,
             self.master.target_component,
@@ -151,17 +150,18 @@ class DroneController:
         if angle is None:
             angle = np.degrees(np.arctan2(direction[1], direction[0])) * -1
         self.turn(angle)
-        print(f"Turning to direction {direction} (angle {angle:.1f} degrees)", flush=True)
+        # print(f"Turning to direction {direction} (angle {angle:.1f} degrees)", flush=True)
         time.sleep(8)
 
     def follow_path(self, steering_error, yaw_rate, path_angle, speed=0.5):
         if steering_error is None:
             self.send_velocity()
             return False
-        if abs(path_angle) > 35:
-            print(path_angle)
-            self.turn(path_angle * 2 / 3, speed=8)
-            time.sleep(2)
+        if abs(path_angle) > 30:
+            if time.time() - self.last_turn_time > 2:
+                self.turn(path_angle * 2 / 3, speed=8)
+                self.last_turn_time = time.time()
+                time.sleep(1.5)
         self.send_velocity(
             vx=speed,
             vy=np.clip(steering_error * speed * self.lateral_gain, -1, 1),
