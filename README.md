@@ -1,4 +1,5 @@
 # Autonomous Drone Airport Navigation
+![world_image](Simulation Video/world.png)
  
 **IESL RoboGames 2025/26 — University Category, Semi-Final Task**
 **Team Motorbrains** · Semi-Finalists
