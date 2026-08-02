@@ -159,8 +159,10 @@ See the `Makefile` for any project-specific shortcuts to the steps above.
 **Semi-Finalists** — IESL RoboGames 2025/26, University Category, Advanced Robotics Programming Challenge.
  
 ## Team — Motorbrains
-- [r-nimantha](https://github.com/r-nimantha)
-- [Zee144](https://github.com/Zee144)
-- [ManiiAya](https://github.com/ManiiAya) — Manitha Ayanaja
+- Roshan Nimantha
+- Manitha Ayanaja
+- Dilith Abeywarna
+- Mokshan Colombage
+- Mishen Weerasinghe
 ## Acknowledgements
 IESL RoboGames 2025/26, organized with the Department of Computer Science & Engineering, University of Moratuwa, and sponsored by SLT-Mobitel.
